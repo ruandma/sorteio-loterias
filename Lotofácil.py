@@ -3547,8 +3547,8 @@ RESULTADOS = [
 # 🔧 CONFIGURAÇÕES FINAIS
 # ==============================================================================
 MIN_CONCURSOS_TREINO = 100
-NUM_PALPITES = 2                 # Apenas 2 palpites (para suas apostas de sexta)
-MONTE_CARLO_TENTATIVAS = 100000  # Alta cobertura para os 2 melhores
+NUM_PALPITES = 1                 # Apenas 1 palpite
+MONTE_CARLO_TENTATIVAS = 100000  # Alta cobertura para o melhor palpite
 CLUSTER_K = 5
 CLUSTER_CONCURSOS = 500
 
@@ -3911,7 +3911,7 @@ def calcular_pontuacao_adaptativa(
     return float(score)
 
 # ==============================================================================
-# 🎲 MONTE CARLO HÍBRIDO COM DIVERSIFICAÇÃO (2 PALPITES)
+# 🎲 MONTE CARLO HÍBRIDO — APENAS 1 PALPITE
 # ==============================================================================
 def gerar_palpites_hibridos(
     prob_ensemble: List[float],
@@ -3926,16 +3926,16 @@ def gerar_palpites_hibridos(
     ultimo_sorteio: Set[int],
     todos_sorteios: Set[Tuple],
     limites: Dict,
-    num_palpites_final: int = 2,
+    num_palpites_final: int = 1,
     tentativas: int = 100000
 ) -> List[List[int]]:
     candidatos = list(range(1, 26))
     pesos = [0.7 * prob_ensemble[i] + 0.3 * (freq_total[i+1] / total_concursos) for i in range(25)]
     pesos = [max(p, 0.01) for p in pesos]
-    palpites_validos = []
+    melhor_palpite = None
+    melhor_score = -1
+
     for _ in range(tentativas):
-        if len(palpites_validos) >= num_palpites_final * 20:
-            break
         try:
             palpite = random.choices(candidatos, weights=pesos, k=15)
             if len(set(palpite)) != 15:
@@ -3943,35 +3943,25 @@ def gerar_palpites_hibridos(
             palpite = sorted(palpite)
         except:
             palpite = sorted(random.sample(candidatos, 15))
+        
         if not passa_filtros_dinamicos(palpite, ultimo_sorteio, todos_sorteios, distrib_global, limites):
             continue
+        
         palpite_bin = np.array([1 if i+1 in palpite else 0 for i in range(25)])
         score = calcular_pontuacao_adaptativa(
             palpite, prob_ensemble, prob_bayes, palpite_bin,
             media_hist, cov_inv, distrib_global, cluster_concursos, regime,
             sum(palpite), sum(1 for n in palpite if n % 2 == 0)
         )
-        palpites_validos.append((score, palpite))
-    palpites_validos.sort(key=lambda x: x[0], reverse=True)
-    palpites_sorted = [p for _, p in palpites_validos]
-    final = []
-    for p in palpites_sorted:
-        if not final:
-            final.append(p)
-        else:
-            # Garantir diversidade: pelo menos 6 números diferentes
-            if all(len(set(p) & set(existing)) <= 9 for existing in final):
-                final.append(p)
-        if len(final) >= num_palpites_final:
-            break
-    if not final:
+        if score > melhor_score:
+            melhor_score = score
+            melhor_palpite = palpite
+
+    if melhor_palpite is None:
         candidatos_by_freq = sorted(range(1, 26), key=lambda x: freq_total[x], reverse=True)
-        final = [sorted(candidatos_by_freq[:15])]
-    elif len(final) < num_palpites_final:
-        more = [p for p in palpites_sorted if p not in final]
-        while len(final) < num_palpites_final and more:
-            final.append(more.pop(0))
-    return final[:num_palpites_final]
+        melhor_palpite = sorted(candidatos_by_freq[:15])
+    
+    return [melhor_palpite]
 
 # ==============================================================================
 # ▶️ EXECUÇÃO PRINCIPAL
@@ -3989,7 +3979,7 @@ if __name__ == "__main__":
         if len(RESULTADOS) < MIN_CONCURSOS_TREINO:
             print(f"⚠️  Poucos concursos ({len(RESULTADOS)}). Usando fallback estatístico.")
             candidatos = sorted(range(1, 26), key=lambda x: freq_total[x], reverse=True)
-            palpites = [sorted(candidatos[:15]) for _ in range(NUM_PALPITES)]
+            palpites = [sorted(candidatos[:15])]
         else:
             ultimo_sorteio = set(RESULTADOS[-1])
             todos_sorteios = {tuple(sorted(s)) for s in RESULTADOS}
@@ -4005,7 +3995,7 @@ if __name__ == "__main__":
             prob_bayes = calcular_probabilidades_condicionais(RESULTADOS)
             print("📏 Preparando Mahalanobis regularizada...")
             media_hist, cov_inv = preparar_estatisticas_mahalanobis_regularizada(RESULTADOS)
-            print(f"\n🎯 Gerando {NUM_PALPITES} palpites com Monte Carlo híbrido...")
+            print(f"\n🎯 Gerando {NUM_PALPITES} palpite com Monte Carlo híbrido...")
             palpites = gerar_palpites_hibridos(
                 prob_ensemble, freq_total, len(RESULTADOS), prob_bayes,
                 media_hist, cov_inv, distrib_global, cluster_concursos, regime,
@@ -4013,16 +4003,16 @@ if __name__ == "__main__":
                 NUM_PALPITES, MONTE_CARLO_TENTATIVAS
             )
         print("\n" + "="*75)
-        print("✅ SEUS 2 PALPITES OTIMIZADOS PARA A LOTOFÁCIL")
+        print("✅ SEU PALPITE ÚNICO OTIMIZADO PARA A LOTOFÁCIL")
         print("="*75)
-        for i, palpite in enumerate(palpites, 1):
-            soma = sum(palpite)
-            pares = sum(1 for n in palpite if n % 2 == 0)
-            dist_med = distancia_media_entre_numeros(palpite)
-            ent = entropia_shannon(palpite, distrib_global)
-            print(f"\nPalpite {i}: " + " - ".join(f"{n:2}" for n in palpite))
-            print(f"   • Soma: {soma} | Pares: {pares}")
-            print(f"   • Distância média: {dist_med:.2f} | Entropia: {ent:.2f}")
+        palpite = palpites[0]
+        soma = sum(palpite)
+        pares = sum(1 for n in palpite if n % 2 == 0)
+        dist_med = distancia_media_entre_numeros(palpite)
+        ent = entropia_shannon(palpite, distrib_global)
+        print(f"\nPalpite único: " + " - ".join(f"{n:2}" for n in palpite))
+        print(f"   • Soma: {soma} | Pares: {pares}")
+        print(f"   • Distância média: {dist_med:.2f} | Entropia: {ent:.2f}")
     except Exception as e:
         print(f"❌ Erro crítico: {e}")
         raise
